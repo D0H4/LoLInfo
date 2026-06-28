@@ -127,8 +127,11 @@ export function itemStatLabel(key: string) {
 
 /** 아이템 스탯 값 포맷 (음수면 빨강, percent면 %) */
 export function formatItemStat(key: string, value: number) {
-  const isPercent =
-    key.startsWith('Percent') || key.startsWith('rPercent') || key.includes('Penetration')
+  // DDragon stores fractional percent mods under keys prefixed with `Percent`
+  // or `rPercent` (e.g. PercentMovementSpeedMod 0.05 -> 5%). Flat mods —
+  // including flat penetration (Flat/rFlat...PenetrationMod) — are absolute
+  // values and must not be multiplied by 100.
+  const isPercent = key.startsWith('Percent') || key.startsWith('rPercent')
   const sign = value > 0 ? '+' : ''
   if (isPercent) {
     return `${sign}${(value * 100).toFixed(value * 100 % 1 === 0 ? 0 : 1)}%`
@@ -136,4 +139,31 @@ export function formatItemStat(key: string, value: number) {
   const abs = Math.abs(value)
   const decimals = abs % 1 === 0 ? 0 : abs < 1 ? 3 : 1
   return `${sign}${value.toFixed(decimals)}`
+}
+
+
+/**
+ * description의 <stats> 블록에서 스탯 라벨/값을 추출한다.
+ * DDragon의 레거시 `stats` 객체는 마법 관통·스킬 가속·재생 등 상당수 스탯을
+ * 누락하지만, 설명의 <stats> 블록은 한국어로 완전하게 포맷되어 있어 더 정확하다.
+ * 값 강조는 <attention> / <ornnBonus> 태그로 표기되며 항목은 <br>로 구분된다.
+ */
+export function parseDescriptionStats(
+  description: string,
+): Array<{ label: string; value: string }> {
+  const match = description.match(/<stats>([\s\S]*?)<\/stats>/i)
+  if (!match) return []
+
+  const highlight = /<(?:attention|ornnBonus)>([\s\S]*?)<\/(?:attention|ornnBonus)>/gi
+
+  return match[1]
+    .split(/<br\s*\/?>/i)
+    .map((segment) => {
+      const values = [...segment.matchAll(highlight)]
+        .map((m) => cleanHtml(m[1]))
+        .filter(Boolean)
+      const label = cleanHtml(segment.replace(highlight, ''))
+      return { label, value: values.join(' ') }
+    })
+    .filter((stat) => stat.label || stat.value)
 }
