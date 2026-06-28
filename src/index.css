@@ -1,0 +1,231 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   테마 토큰 — 라이트/다크 양쪽에서 같은 유틸리티(bg-card, text-fg ...)를 쓰도록
+   :root / .dark 에서 변수를 바꾸고 @theme inline 로 매핑.
+   --------------------------------------------------------------------------- */
+:root {
+  --bg: #eef2f8;
+  --card: #ffffff;
+  --panel: #f4f7fc;
+  --panel-2: #eaeef5;
+  --line: #dce3ee;
+  --line-strong: #c4cedd;
+  --fg: #0e1626;
+  --muted: #5b6b85;
+  --accent: #2f7df6;
+  --accent-strong: #1c63d6;
+  --accent-soft: #dbeafe;
+  --accent-contrast: #ffffff;
+  --danger: #c8403a;
+  --shadow: 220 25% 30%;
+}
+
+.dark {
+  --bg: #16243f;
+  --card: #1d2e4d;
+  --panel: #1a2b48;
+  --panel-2: #243757;
+  --line: #324870;
+  --line-strong: #425c8a;
+  --fg: #eaf1fb;
+  --muted: #9bb0d6;
+  --accent: #4d8cff;
+  --accent-strong: #7aabff;
+  --accent-soft: rgba(77, 140, 255, 0.16);
+  --accent-contrast: #0a1a33;
+  --danger: #f08a82;
+  --shadow: 220 50% 12%;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-danger: var(--danger);
+
+  --font-sans: 'Pretendard', 'Pretendard Variable', system-ui, -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+}
+
+@theme {
+  --radius-card: 1rem;
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   베이스
+   --------------------------------------------------------------------------- */
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  /* 스크롤바 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--line-strong);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* range slider */
+  input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--panel-2);
+  }
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: var(--accent);
+    border: 3px solid var(--card);
+    box-shadow: 0 1px 4px hsl(var(--shadow) / 0.5);
+    cursor: pointer;
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: var(--accent);
+    border: 3px solid var(--card);
+    cursor: pointer;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   재사용 컴포넌트 클래스
+   --------------------------------------------------------------------------- */
+@layer components {
+  .card {
+    @apply rounded-card border border-line bg-card;
+    background-image: linear-gradient(
+      to bottom right,
+      hsl(var(--shadow) / 0.02),
+      transparent 40%
+    );
+  }
+
+  .card-hover {
+    @apply transition;
+  }
+  .card-hover:hover {
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-panel px-2.5 py-0.5 text-xs font-medium text-muted;
+  }
+  .pill-accent {
+    @apply border-accent/40 bg-accent-soft text-accent-strong;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm text-fg transition placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-fg transition hover:border-line-strong hover:bg-panel-2 active:scale-[0.98];
+  }
+  .btn-accent {
+    @apply border-accent/50 bg-accent text-accent-contrast hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-panel;
+  }
+
+  .chip {
+    @apply rounded-full border px-3 py-1 text-xs font-semibold transition;
+  }
+  .chip-active {
+    @apply border-accent bg-accent text-accent-contrast;
+  }
+  .chip-idle {
+    @apply border-line bg-panel text-muted hover:border-line-strong hover:text-fg;
+  }
+
+  .meta-dl dt {
+    @apply text-xs text-muted;
+  }
+  .meta-dl dd {
+    @apply font-mono text-sm font-semibold text-fg;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   유틸리티
+   --------------------------------------------------------------------------- */
+@utility text-balance {
+  text-wrap: balance;
+}
+
+/* 줄바꿈/개행 보존 */
+.preserve-lines {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 스펠 키(Q/W/E/R) 배지 */
+.spell-key {
+  @apply flex h-7 w-7 items-center justify-center rounded-md text-xs font-bold text-white;
+}
+.spell-key-Q {
+  background: #4d7cff;
+}
+.spell-key-W {
+  background: #2faa6a;
+}
+.spell-key-E {
+  background: #e08a1e;
+}
+.spell-key-R {
+  background: #9b59e0;
+}
