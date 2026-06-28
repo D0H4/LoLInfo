@@ -5,6 +5,7 @@ import {
   cleanHtml,
   formatItemStat,
   itemStatLabel,
+  parseDescriptionStats,
 } from '../../lib/format'
 import { ArrowRightIcon, CoinIcon, LayersIcon } from '../icons'
 
@@ -16,6 +17,12 @@ type Props = {
 export function ItemDetail({ item, onSelectItem }: Props) {
   const fromItems = item.from ?? []
   const intoItems = item.into ?? []
+
+  // 설명의 <stats> 블록을 우선 사용하고(완전·정확), 비어 있으면 레거시 stats 객체로 폴백한다.
+  const descStats = parseDescriptionStats(item.description)
+  const objStats = Object.entries(item.stats).filter(([, value]) => value)
+  const useDescStats = descStats.length > 0
+  const hasStats = useDescStats || objStats.length > 0
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,27 +96,45 @@ export function ItemDetail({ item, onSelectItem }: Props) {
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-muted">
           스탯
         </h3>
-        {Object.keys(item.stats).length > 0 ? (
+        {hasStats ? (
           <ul className="grid gap-1.5 sm:grid-cols-2">
-            {Object.entries(item.stats).map(([key, value]) => {
-              if (!value) return null
-              const positive = value > 0
-              return (
-                <li
-                  key={key}
-                  className="flex items-center justify-between rounded-lg bg-panel px-3 py-1.5 text-sm"
-                >
-                  <span className="text-muted">{itemStatLabel(key)}</span>
-                  <span
-                    className={`font-mono font-semibold ${
-                      positive ? 'text-fg' : 'text-danger'
-                    }`}
-                  >
-                    {formatItemStat(key, value)}
-                  </span>
-                </li>
-              )
-            })}
+            {useDescStats
+              ? descStats.map((stat, index) => {
+                  const negative = stat.value.trim().startsWith('-')
+                  return (
+                    <li
+                      key={`${stat.label}-${index}`}
+                      className="flex items-center justify-between rounded-lg bg-panel px-3 py-1.5 text-sm"
+                    >
+                      <span className="text-muted">{stat.label}</span>
+                      <span
+                        className={`font-mono font-semibold ${
+                          negative ? 'text-danger' : 'text-fg'
+                        }`}
+                      >
+                        {stat.value}
+                      </span>
+                    </li>
+                  )
+                })
+              : objStats.map(([key, value]) => {
+                  const positive = value > 0
+                  return (
+                    <li
+                      key={key}
+                      className="flex items-center justify-between rounded-lg bg-panel px-3 py-1.5 text-sm"
+                    >
+                      <span className="text-muted">{itemStatLabel(key)}</span>
+                      <span
+                        className={`font-mono font-semibold ${
+                          positive ? 'text-fg' : 'text-danger'
+                        }`}
+                      >
+                        {formatItemStat(key, value)}
+                      </span>
+                    </li>
+                  )
+                })}
           </ul>
         ) : (
           <p className="text-sm text-muted">제공된 스탯이 없습니다.</p>
