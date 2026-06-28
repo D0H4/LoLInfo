@@ -1,12 +1,18 @@
-import type { ChampionDetail, ChampionStats, ItemEntry } from '../types'
+import type {
+  ChampionDetail,
+  ChampionStats,
+  ChampionSummary,
+  ItemEntry,
+} from '../types'
 import { championAliasOverrides, itemAliasOverrides } from '../data/aliases'
 import {
-  championDetails,
   championList,
   getItemName,
   isItemAvailableOnMap,
   itemList,
+  loadChampionDetail,
 } from './data'
+import { formatItemStat, itemStatLabel, parseDescriptionStats } from './format'
 
 type SpellKey = 'P' | 'Q' | 'W' | 'E' | 'R'
 type QueryField =
@@ -85,7 +91,7 @@ function cleanHtml(value: string) {
     .trim()
 }
 
-function getChampionAliases(champion: ChampionDetail) {
+function getChampionAliases(champion: Pick<ChampionSummary, 'id' | 'name'>) {
   return [
     champion.id,
     champion.name,
@@ -103,25 +109,23 @@ function getItemAliases(item: ItemEntry) {
   ].filter(Boolean)
 }
 
-function findChampion(query: string) {
+function findChampion(query: string): ChampionSummary | undefined {
   const normalizedQuery = normalize(query)
   const matches = championList
-    .map((summary) => championDetails[summary.id])
-    .filter(Boolean)
-    .map((champion) => {
-      const matchedAlias = getChampionAliases(champion)
+    .map((summary) => {
+      const matchedAlias = getChampionAliases(summary)
         .map((alias) => normalize(alias))
         .filter((alias) => alias && normalizedQuery.includes(alias))
         .sort((a, b) => b.length - a.length)[0]
 
-      return matchedAlias ? { champion, score: matchedAlias.length } : null
+      return matchedAlias ? { summary, score: matchedAlias.length } : null
     })
-    .filter((match): match is { champion: ChampionDetail; score: number } =>
+    .filter((match): match is { summary: ChampionSummary; score: number } =>
       Boolean(match),
     )
     .sort((a, b) => b.score - a.score)
 
-  return matches[0]?.champion
+  return matches[0]?.summary
 }
 
 function findItem(query: string, options: NaturalSearchOptions = {}) {
@@ -134,7 +138,13 @@ function findItem(query: string, options: NaturalSearchOptions = {}) {
     .map((item) => {
       const matchedAlias = getItemAliases(item)
         .map((alias) => normalize(alias))
-        .filter((alias) => alias && normalizedQuery.includes(alias))
+        .filter((alias) => {
+          if (!alias) return false
+          // Numeric ids (e.g. "1001") would otherwise match as a substring of
+          // any number in the query. Only accept them on an exact match.
+          if (/^\d+$/.test(alias)) return normalizedQuery === alias
+          return normalizedQuery.includes(alias)
+        })
         .sort((a, b) => b.length - a.length)[0]
 
       return matchedAlias ? { item, score: matchedAlias.length } : null
@@ -213,7 +223,10 @@ function spellFieldValue(
   }
 }
 
-function championStatResult(champion: ChampionDetail, field: QueryField) {
+function championStatResult(
+  champion: Pick<ChampionSummary, 'name' | 'stats'>,
+  field: QueryField,
+) {
   const statField = field === 'range' ? 'attackrange' : field
 
   if (!(statField in champion.stats)) {
@@ -223,15 +236,33 @@ function championStatResult(champion: ChampionDetail, field: QueryField) {
   const statKey = statField as keyof ChampionStats
   const label = statLabels[statKey] ?? statKey
   const growthKey = `${statKey}perlevel` as keyof ChampionStats
+  const growthValue = champion.stats[growthKey]
+  // 성장값이 0이면 표시하지 않는다. DDragon 데이터는 일부 필드(특히 레벨당 공격력)를
+  // 모든 챔피언에 대해 0으로 제공하므로, "성장 0"은 오해를 줄 수 있다.
   const growth =
-    typeof champion.stats[growthKey] === 'number'
-      ? ` / 성장 ${champion.stats[growthKey]}`
+    typeof growthValue === 'number' && growthValue !== 0
+      ? ` / 성장 ${growthValue}`
       : ''
 
   return {
     title: `${champion.name} ${label}`,
     value: `${champion.stats[statKey]}${growth}`,
   }
+}
+
+function itemStatsLine(item: ItemEntry): string {
+  // 상세 화면과 동일하게 설명의 <stats> 블록을 우선 사용하고, 없으면 stats 객체로 폴백한다.
+  const descStats = parseDescriptionStats(item.description)
+  if (descStats.length > 0) {
+    return descStats
+      .map((stat) => (stat.value ? `${stat.label} ${stat.value}` : stat.label))
+      .join(' · ')
+  }
+
+  return Object.entries(item.stats)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${itemStatLabel(key)} ${formatItemStat(key, value)}`)
+    .join(' · ')
 }
 
 function itemResult(item: ItemEntry, field: QueryField | undefined) {
@@ -247,19 +278,23 @@ function itemResult(item: ItemEntry, field: QueryField | undefined) {
         value: `하위 아이템: ${item.from?.map(getItemName).join(', ') || '-'}`,
         detail: `상위 아이템: ${item.into?.map(getItemName).join(', ') || '-'}`,
       }
-    default:
+    default: {
+      const stats = itemStatsLine(item)
       return {
         title: item.name,
         value: item.plaintext || cleanHtml(item.description),
-        detail: `가격 ${item.gold.total}g`,
+        detail: [stats && `스탯: ${stats}`, `가격 ${item.gold.total}g`]
+          .filter(Boolean)
+          .join('\n'),
       }
+    }
   }
 }
 
-export function searchNaturalLanguage(
+export async function searchNaturalLanguage(
   query: string,
   options: NaturalSearchOptions = {},
-): NaturalSearchResult[] {
+): Promise<NaturalSearchResult[]> {
   const trimmedQuery = query.trim()
 
   if (!trimmedQuery) {
@@ -268,19 +303,27 @@ export function searchNaturalLanguage(
 
   const field = parseField(trimmedQuery)
   const spellKey = parseSpellKey(trimmedQuery)
-  const champion = findChampion(trimmedQuery)
+  const summary = findChampion(trimmedQuery)
 
-  if (champion) {
+  if (summary) {
+    // 스탯 쿼리는 summary.stats로 즉시 해소한다 — 챔피언 상세 청크 로드 불필요.
+    if (!spellKey && field) {
+      const statResult = championStatResult(summary, field)
+      if (statResult) {
+        return [{ id: `${summary.id}-${field}`, ...statResult }]
+      }
+    }
+
+    // 그 외(스킬 키가 있거나, 스탯이 아닌 field, 또는 전체 스킬 목록)는
+    // spells/passive가 필요하므로 이때만 상세를 동적 로드한다.
+    const champion = await loadChampionDetail(summary.id)
+    if (!champion) {
+      return []
+    }
+
     if (spellKey) {
       const result = spellFieldValue(champion, spellKey, field)
       return result ? [{ id: `${champion.id}-${spellKey}-${field ?? 'summary'}`, ...result }] : []
-    }
-
-    if (field) {
-      const statResult = championStatResult(champion, field)
-      if (statResult) {
-        return [{ id: `${champion.id}-${field}`, ...statResult }]
-      }
     }
 
     return champion.spells.map((spell, index) => ({

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ViewMode } from './types'
+import type { ChampionDetail as ChampionDetailData, ViewMode } from './types'
 
 const VIEW_MODE_STORAGE_KEY = 'lolinfo:viewMode'
 
@@ -15,11 +15,11 @@ function getInitialViewMode(): ViewMode {
 }
 import { manifest } from './lib/ddragon'
 import {
-  championDetails,
   championList,
   isItemAvailableOnMap,
   itemList,
   items,
+  loadChampionDetail,
 } from './lib/data'
 import { useTheme } from './hooks/useTheme'
 import { Header } from './components/Header'
@@ -28,6 +28,7 @@ import { ChampionDetail } from './components/champions/ChampionDetail'
 import { ItemGrid } from './components/items/ItemGrid'
 import { ItemDetail } from './components/items/ItemDetail'
 import { searchNaturalLanguage } from './lib/naturalSearch'
+import type { NaturalSearchResult } from './lib/naturalSearch'
 import { ArrowUpIcon, ChevronDownIcon } from './components/icons'
 
 const itemMapLabels: Record<string, string> = {
@@ -53,16 +54,21 @@ const itemMapOptions = Array.from(
   .sort((a, b) => Number(a) - Number(b))
 
 function uniqueItemsByName(list: typeof itemList) {
-  const seen = new Set<string>()
+  // Pick one canonical entry per name deterministically: the lowest numeric id.
+  // Canonical shop items use lower ids than their mode variants, and tying the
+  // choice to the id (instead of sort stability / JSON key order) keeps it
+  // stable regardless of input ordering. We first resolve the winning id per
+  // name, then filter so the original (name-sorted) display order is preserved.
+  const canonicalIdByName = new Map<string, string>()
 
-  return list.filter((item) => {
-    if (seen.has(item.name)) {
-      return false
+  for (const item of list) {
+    const current = canonicalIdByName.get(item.name)
+    if (current === undefined || Number(item.id) < Number(current)) {
+      canonicalIdByName.set(item.name, item.id)
     }
+  }
 
-    seen.add(item.name)
-    return true
-  })
+  return list.filter((item) => canonicalIdByName.get(item.name) === item.id)
 }
 
 function App() {
@@ -91,14 +97,52 @@ function App() {
     filteredItemList[0]?.id ?? '',
   )
 
-  const champion = championDetails[selectedChampionId]
+  const [champion, setChampion] = useState<ChampionDetailData | undefined>(undefined)
+  const [championLoading, setChampionLoading] = useState(false)
+
+  // 챔피언 상세는 동적 import 청크라 비동기로 로드한다. 빠르게 전환할 때 이전
+  // 요청이 늦게 도착해 덮어쓰지 않도록 active 플래그로 stale 응답을 버린다.
+  useEffect(() => {
+    if (!selectedChampionId) {
+      setChampion(undefined)
+      return
+    }
+
+    let active = true
+    setChampionLoading(true)
+    loadChampionDetail(selectedChampionId).then((detail) => {
+      if (!active) return
+      setChampion(detail)
+      setChampionLoading(false)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [selectedChampionId])
+
   const selectedItem = useMemo(() => items[selectedItemId], [selectedItemId])
 
-  useEffect(() => {
-    if (!filteredItemList.some((item) => item.id === selectedItemId)) {
-      setSelectedItemId(filteredItemList[0]?.id ?? '')
+  // Switching maps may leave the current selection unavailable, so reset it in
+  // the change handler rather than an effect. Doing it here (instead of
+  // reacting to selectedItemId) means navigating into recipe components — which
+  // may be deduped out of the list or belong to another map — displays that
+  // item instead of bouncing the selection back to the first entry.
+  const handleItemMapChange = (mapId: string) => {
+    setSelectedItemMap(mapId)
+
+    const current = items[selectedItemId]
+    const stillAvailable =
+      current &&
+      isItemAvailableOnMap({ id: selectedItemId, ...current }, mapId)
+
+    if (!stillAvailable) {
+      const nextList = uniqueItemsByName(
+        itemList.filter((item) => isItemAvailableOnMap(item, mapId)),
+      )
+      setSelectedItemId(nextList[0]?.id ?? '')
     }
-  }, [filteredItemList, selectedItemId])
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-bg md:h-screen md:overflow-hidden">
@@ -132,7 +176,7 @@ function App() {
                     맵
                     <select
                       value={selectedItemMap}
-                      onChange={(event) => setSelectedItemMap(event.target.value)}
+                      onChange={(event) => handleItemMapChange(event.target.value)}
                       className="input"
                     >
                       {itemMapOptions.map((mapId) => (
@@ -161,11 +205,13 @@ function App() {
           {viewMode === 'search' ? (
             <SearchPanel
               selectedItemMap={selectedItemMap}
-              onItemMapChange={setSelectedItemMap}
+              onItemMapChange={handleItemMapChange}
             />
           ) : viewMode === 'champions' ? (
-            champion ? (
+            champion && champion.id === selectedChampionId ? (
               <ChampionDetail champion={champion} />
+            ) : championLoading ? (
+              <EmptyState text="불러오는 중..." />
             ) : (
               <EmptyState text="챔피언을 선택해 주세요." />
             )
@@ -190,10 +236,19 @@ function SearchPanel({
   onItemMapChange,
 }: SearchPanelProps) {
   const [query, setQuery] = useState('')
-  const results = useMemo(
-    () => searchNaturalLanguage(query, { itemMapId: selectedItemMap }),
-    [query, selectedItemMap],
-  )
+  const [results, setResults] = useState<NaturalSearchResult[]>([])
+
+  // 검색은 챔피언 상세를 지연 로드할 수 있어 async다. 빠르게 입력하거나 맵을
+  // 바꿀 때 이전 쿼리 결과가 늦게 도착해 덮어쓰지 않도록 active로 차단한다.
+  useEffect(() => {
+    let active = true
+    searchNaturalLanguage(query, { itemMapId: selectedItemMap }).then((r) => {
+      if (active) setResults(r)
+    })
+    return () => {
+      active = false
+    }
+  }, [query, selectedItemMap])
 
   const hasQuery = query.trim().length > 0
 
