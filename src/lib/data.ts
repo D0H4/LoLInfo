@@ -9,21 +9,44 @@ import type {
 import championSummary from '../data/ddragon/champion-summary.json'
 import itemData from '../data/ddragon/item.json'
 
-const championFiles = import.meta.glob<ChampionFile>(
-  '../data/ddragon/champions/*.json',
-  { eager: true, import: 'default' },
-)
-
 export const championList: ChampionSummary[] = Object.values(
   (championSummary as { data: Record<string, ChampionSummary> }).data,
 ).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
 
-export const championDetails: Record<string, ChampionDetail> = Object.fromEntries(
-  Object.values(championFiles).map((file) => {
-    const champion = Object.values(file.data)[0]
-    return [champion.id, champion]
+// 챔피언 상세(173개, ~4.7M)는 초기 번들에서 가장 큰 비중을 차지하지만 한 번에 한
+// 명만 화면에 표시된다. eager 대신 lazy glob으로 두어 선택/검색 시 해당 챔피언
+// 청크만 동적으로 가져온다. glob 키는 파일 경로(예: '.../champions/Aatrox.json')이고
+// basename은 챔피언 id와 1:1로 일치한다.
+const championLoaders = import.meta.glob<ChampionFile>(
+  '../data/ddragon/champions/*.json',
+  { import: 'default' },
+)
+
+const loaderById = new Map<string, () => Promise<ChampionFile>>(
+  Object.entries(championLoaders).map(([path, load]) => {
+    const id = path.slice(path.lastIndexOf('/') + 1).replace(/\.json$/, '')
+    return [id, load]
   }),
 )
+
+// 한 번 로드한 상세는 앱 수명 동안 캐시해 반복 선택 시 재요청을 피한다.
+const detailCache = new Map<string, ChampionDetail>()
+
+export async function loadChampionDetail(
+  id: string,
+): Promise<ChampionDetail | undefined> {
+  const cached = detailCache.get(id)
+  if (cached) return cached
+
+  const load = loaderById.get(id)
+  if (!load) return undefined
+
+  const champion = Object.values((await load()).data)[0]
+  if (champion) {
+    detailCache.set(id, champion)
+  }
+  return champion
+}
 
 const itemsAll = (itemData as ItemData).data
 
@@ -42,14 +65,30 @@ export function getItem(itemId: string): ItemDetail | undefined {
   return items[itemId]
 }
 
+// DDragon assigns 6-digit ids (>= 100000) to game-mode-specific item variants
+// (Arena augments, ARAM/Rift duplicates, cosmetic entries). Every canonical
+// shop item uses a <=5-digit id (the current max on the Rift is 8020), so the
+// 6-digit boundary cleanly separates real items from mode variants without the
+// fragility of an arbitrary cutoff.
+const MODE_VARIANT_ID_MIN = 100000
+
+const SUMMONERS_RIFT_MAP_ID = '11'
+
+function isModeVariantItem(id: string) {
+  const numericId = Number(id)
+  return Number.isFinite(numericId) && numericId >= MODE_VARIANT_ID_MIN
+}
+
 export function isItemAvailableOnMap(item: ItemEntry, mapId: string) {
   if (!item.gold.purchasable || item.maps?.[mapId] !== true) {
     return false
   }
 
-  // DDragon includes some mode-specific duplicate items as map 11 entries.
-  // Real Summoner's Rift shop item ids are kept below this range.
-  if (mapId === '11' && Number(item.id) >= 10000) {
+  // Summoner's Rift only stocks canonical items, but DDragon also flags a
+  // number of mode-variant duplicates as available on map 11. Drop those so the
+  // Rift item list/search matches the in-game shop. Other modes (e.g. Arena,
+  // map 30) legitimately use 6-digit ids, so the filter is Rift-only.
+  if (mapId === SUMMONERS_RIFT_MAP_ID && isModeVariantItem(item.id)) {
     return false
   }
 

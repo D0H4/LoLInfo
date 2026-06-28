@@ -84,6 +84,10 @@ export type ChampionSummary = {
   partype: string
   image: ChampionImage
   info: ChampionInfo
+  // champion-summary.json은 아래 필드도 포함한다. 상세(spells/passive/lore)와 달리
+  // 목록·검색 매칭과 스탯 조회에 쓰여 초기 로드에 필요하므로 summary에 둔다.
+  stats: ChampionStats
+  blurb: string
 }
 
 export type ItemGold = {
