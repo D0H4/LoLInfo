@@ -6,12 +6,12 @@ const VIEW_MODE_STORAGE_KEY = 'lolinfo:viewMode'
 const validViewModes: ViewMode[] = ['champions', 'items', 'search']
 
 function getInitialViewMode(): ViewMode {
-  if (typeof window === 'undefined') return 'champions'
+  if (typeof window === 'undefined') return 'search'
   const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
   if (stored && validViewModes.includes(stored as ViewMode)) {
     return stored as ViewMode
   }
-  return 'champions'
+  return 'search'
 }
 import { manifest } from './lib/ddragon'
 import {
